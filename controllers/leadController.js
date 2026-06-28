@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 
 /**
@@ -28,6 +29,13 @@ const createLead = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: `Validation failed: Missing required fields: ${missingFields.join(', ')}.`
+      });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable. Please try again shortly.'
       });
     }
 

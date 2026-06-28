@@ -38,7 +38,7 @@ const connectDB = async (customOptions = {}) => {
 
   if (!mongoURI) {
     console.error('Error: MONGO_URI environment variable is not defined.');
-    process.exit(1);
+    return false;
   }
 
   // Production-grade connection options
@@ -52,11 +52,12 @@ const connectDB = async (customOptions = {}) => {
 
   try {
     await mongoose.connect(mongoURI, options);
+    return true;
   } catch (error) {
     // Note: The error listener will also trigger and log the connection error,
-    // but we log and exit here to handle the initial connection failure.
+    // but we log and rethrow here so the server can start and return a graceful error response.
     console.error('Initial MongoDB connection failed:', error.message);
-    process.exit(1);
+    throw error;
   }
 };
 
