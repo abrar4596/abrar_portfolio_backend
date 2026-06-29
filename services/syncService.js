@@ -5,10 +5,22 @@ const Lead = require('../models/Lead');
 const FALLBACK_DIR = path.join(__dirname, '..', 'data');
 const FALLBACK_FILE = path.join(FALLBACK_DIR, 'leads_fallback.json');
 
+// Serverless-compatible file path resolution
+const getFallbackFile = () => {
+  if (process.env.VERCEL || process.env.NOW_REGION) {
+    return path.join('/tmp', 'leads_fallback.json');
+  }
+  return FALLBACK_FILE;
+};
+
 /**
  * Ensures the fallback directory exists.
  */
 const ensureFallbackDirectory = () => {
+  // If running on Vercel, we write to /tmp, which always exists and does not require mkdir.
+  if (process.env.VERCEL || process.env.NOW_REGION) {
+    return;
+  }
   if (!fs.existsSync(FALLBACK_DIR)) {
     fs.mkdirSync(FALLBACK_DIR, { recursive: true });
   }
@@ -23,10 +35,11 @@ const saveToFallback = async (leadData) => {
   try {
     ensureFallbackDirectory();
 
+    const fallbackPath = getFallbackFile();
     let leads = [];
-    if (fs.existsSync(FALLBACK_FILE)) {
+    if (fs.existsSync(fallbackPath)) {
       try {
-        const fileContent = fs.readFileSync(FALLBACK_FILE, 'utf8');
+        const fileContent = fs.readFileSync(fallbackPath, 'utf8');
         leads = JSON.parse(fileContent);
         if (!Array.isArray(leads)) {
           leads = [];
@@ -45,7 +58,7 @@ const saveToFallback = async (leadData) => {
     };
 
     leads.push(leadWithMeta);
-    fs.writeFileSync(FALLBACK_FILE, JSON.stringify(leads, null, 2), 'utf8');
+    fs.writeFileSync(fallbackPath, JSON.stringify(leads, null, 2), 'utf8');
     console.log(`[Offline Fallback] Lead saved locally to fallback file. Temp ID: ${tempId}`);
     return tempId;
   } catch (error) {
@@ -58,7 +71,8 @@ const saveToFallback = async (leadData) => {
  * Synchronizes saved offline leads to the MongoDB database.
  */
 const syncFallbackLeads = async () => {
-  if (!fs.existsSync(FALLBACK_FILE)) {
+  const fallbackPath = getFallbackFile();
+  if (!fs.existsSync(fallbackPath)) {
     return;
   }
 
@@ -66,7 +80,7 @@ const syncFallbackLeads = async () => {
 
   let leads = [];
   try {
-    const fileContent = fs.readFileSync(FALLBACK_FILE, 'utf8');
+    const fileContent = fs.readFileSync(fallbackPath, 'utf8');
     leads = JSON.parse(fileContent);
     if (!Array.isArray(leads) || leads.length === 0) {
       console.log('[Sync Service] No leads to sync or file is empty.');
@@ -105,14 +119,14 @@ const syncFallbackLeads = async () => {
 
   if (failedLeads.length > 0) {
     try {
-      fs.writeFileSync(FALLBACK_FILE, JSON.stringify(failedLeads, null, 2), 'utf8');
+      fs.writeFileSync(fallbackPath, JSON.stringify(failedLeads, null, 2), 'utf8');
       console.warn(`[Sync Service] Completed with issues. Synced: ${successCount}, Failed: ${failedLeads.length}. Retained failed leads in fallback file.`);
     } catch (writeError) {
       console.error('[Sync Service] Failed to rewrite remaining failed leads to fallback file:', writeError.message);
     }
   } else {
     try {
-      fs.unlinkSync(FALLBACK_FILE);
+      fs.unlinkSync(fallbackPath);
       console.log(`[Sync Service] Successfully synchronized all ${successCount} leads. Deleted fallback file.`);
     } catch (unlinkError) {
       console.error('[Sync Service] Failed to delete synced fallback file:', unlinkError.message);
@@ -123,5 +137,5 @@ const syncFallbackLeads = async () => {
 module.exports = {
   saveToFallback,
   syncFallbackLeads,
-  FALLBACK_FILE
+  getFallbackFile
 };
