@@ -1,6 +1,15 @@
 const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 
+const isDatabaseUnavailableError = (error) => {
+  return error?.name === 'MongooseServerSelectionError'
+    || error?.name === 'MongoNetworkError'
+    || error?.name === 'MongoServerSelectionError'
+    || error?.code === 'ECONNREFUSED'
+    || error?.message?.includes('Could not connect to any servers')
+    || error?.message?.includes('topology was destroyed');
+};
+
 /**
  * @desc    Create a new client onboarding lead
  * @route   POST /api/leads
@@ -18,12 +27,11 @@ const createLead = async (req, res) => {
       notes
     } = req.body;
 
-    // 1. Basic Presence Validation
     const missingFields = [];
-    if (!clientName) missingFields.push('clientName');
-    if (!budget) missingFields.push('budget');
-    if (!projectType) missingFields.push('projectType');
-    if (!readiness) missingFields.push('readiness');
+    if (!clientName || !String(clientName).trim()) missingFields.push('clientName');
+    if (!budget || !String(budget).trim()) missingFields.push('budget');
+    if (!projectType || !String(projectType).trim()) missingFields.push('projectType');
+    if (!readiness || !String(readiness).trim()) missingFields.push('readiness');
 
     if (missingFields.length > 0) {
       return res.status(400).json({
@@ -35,24 +43,22 @@ const createLead = async (req, res) => {
     if (mongoose.connection.readyState !== 1) {
       return res.status(503).json({
         success: false,
-        message: 'Service temporarily unavailable. Please try again shortly.'
+        message: 'The submission service is temporarily unavailable because the database is unreachable. Please try again shortly.'
       });
     }
 
-    // 2. Database Operation - Instantiate and save
     const newLead = new Lead({
-      clientName,
-      companyName,
-      budget,
-      projectType,
-      coreFeatures,
-      readiness,
-      notes
+      clientName: String(clientName).trim(),
+      companyName: companyName ? String(companyName).trim() : '',
+      budget: String(budget).trim(),
+      projectType: String(projectType).trim(),
+      coreFeatures: Array.isArray(coreFeatures) ? coreFeatures : [],
+      readiness: String(readiness).trim(),
+      notes: notes ? String(notes).trim() : ''
     });
 
     const savedLead = await newLead.save();
 
-    // 3. Response - Return 201 status with success message and lead ID
     return res.status(201).json({
       success: true,
       message: 'Lead onboarding form submitted successfully.',
@@ -61,7 +67,6 @@ const createLead = async (req, res) => {
     });
 
   } catch (error) {
-    // 4. Error Handling - Catch Mongoose validation errors specifically
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -71,11 +76,18 @@ const createLead = async (req, res) => {
       });
     }
 
-    // Catch general server errors
+    if (isDatabaseUnavailableError(error)) {
+      console.error('Lead submission failed because the database is unavailable:', error.message);
+      return res.status(503).json({
+        success: false,
+        message: 'The submission service is temporarily unavailable because the database is unreachable. Please try again shortly.'
+      });
+    }
+
     console.error('Error in createLead controller:', error);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error. Please try again later.'
+      message: 'We could not process your request right now. Please try again later.'
     });
   }
 };
