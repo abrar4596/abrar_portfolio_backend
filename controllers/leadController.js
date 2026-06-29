@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
+const { saveToFallback } = require('../services/syncService');
 
 const isDatabaseUnavailableError = (error) => {
   return error?.name === 'MongooseServerSelectionError'
@@ -41,10 +42,32 @@ const createLead = async (req, res) => {
     }
 
     if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'The submission service is temporarily unavailable because the database is unreachable. Please try again shortly.'
-      });
+      console.warn('[Offline Fallback] Database connection not active. Attempting local file fallback storage...');
+      const payload = {
+        clientName: String(clientName).trim(),
+        companyName: companyName ? String(companyName).trim() : '',
+        budget: String(budget).trim(),
+        projectType: String(projectType).trim(),
+        coreFeatures: Array.isArray(coreFeatures) ? coreFeatures : [],
+        readiness: String(readiness).trim(),
+        notes: notes ? String(notes).trim() : ''
+      };
+
+      try {
+        const tempId = await saveToFallback(payload);
+        return res.status(201).json({
+          success: true,
+          message: 'Lead onboarding form submitted successfully (saved via offline backup).',
+          leadId: tempId,
+          data: payload
+        });
+      } catch (fallbackError) {
+        console.error('Fatal: Both MongoDB and local file fallback failed.', fallbackError.message);
+        return res.status(503).json({
+          success: false,
+          message: 'The submission service is temporarily unavailable because the database is unreachable. Please try again shortly.'
+        });
+      }
     }
 
     const newLead = new Lead({
@@ -77,11 +100,32 @@ const createLead = async (req, res) => {
     }
 
     if (isDatabaseUnavailableError(error)) {
-      console.error('Lead submission failed because the database is unavailable:', error.message);
-      return res.status(503).json({
-        success: false,
-        message: 'The submission service is temporarily unavailable because the database is unreachable. Please try again shortly.'
-      });
+      console.warn('[Offline Fallback] Database connection unavailable during save. Attempting local file fallback storage...', error.message);
+      const payload = {
+        clientName: String(clientName).trim(),
+        companyName: companyName ? String(companyName).trim() : '',
+        budget: String(budget).trim(),
+        projectType: String(projectType).trim(),
+        coreFeatures: Array.isArray(coreFeatures) ? coreFeatures : [],
+        readiness: String(readiness).trim(),
+        notes: notes ? String(notes).trim() : ''
+      };
+
+      try {
+        const tempId = await saveToFallback(payload);
+        return res.status(201).json({
+          success: true,
+          message: 'Lead onboarding form submitted successfully (saved via offline backup).',
+          leadId: tempId,
+          data: payload
+        });
+      } catch (fallbackError) {
+        console.error('Fatal: Both MongoDB and local file fallback failed.', fallbackError.message);
+        return res.status(503).json({
+          success: false,
+          message: 'The submission service is temporarily unavailable because the database is unreachable. Please try again shortly.'
+        });
+      }
     }
 
     console.error('Error in createLead controller:', error);

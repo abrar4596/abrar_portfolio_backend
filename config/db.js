@@ -1,8 +1,13 @@
 const mongoose = require('mongoose');
+const { syncFallbackLeads } = require('../services/syncService');
 
 // Mongoose connection event listeners
 mongoose.connection.on('connected', () => {
   console.log('MongoDB connection established successfully.');
+  // Automatically sync any offline leads back to MongoDB
+  syncFallbackLeads().catch((err) => {
+    console.error('Failed to sync fallback leads on connection:', err.message);
+  });
 });
 
 mongoose.connection.on('error', (err) => {
@@ -51,13 +56,27 @@ const connectDB = async (customOptions = {}) => {
   const options = { ...defaultOptions, ...customOptions };
 
   try {
+    console.log('Attempting to connect to primary MongoDB Atlas...');
     await mongoose.connect(mongoURI, options);
     return true;
   } catch (error) {
-    // Note: The error listener will also trigger and log the connection error,
-    // but we log and rethrow here so the server can start and return a graceful error response.
-    console.error('Initial MongoDB connection failed:', error.message);
-    throw error;
+    console.warn('Primary MongoDB Atlas connection failed:', error.message);
+
+    // Try fallback to local MongoDB if primary fails
+    const localURI = 'mongodb://127.0.0.1:27017/portfolio';
+    if (mongoURI !== localURI) {
+      try {
+        console.log('Attempting fallback connection to local MongoDB...');
+        await mongoose.connect(localURI, options);
+        console.log('Successfully connected to local MongoDB fallback.');
+        return true;
+      } catch (localError) {
+        console.error('Fallback to local MongoDB also failed:', localError.message);
+        throw localError; // Re-throw to allow server startup degradation handling
+      }
+    } else {
+      throw error;
+    }
   }
 };
 
