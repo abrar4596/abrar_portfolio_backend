@@ -48,7 +48,18 @@ const corsOptions = {
   optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
-app.use(express.json()); // Essential to parse JSON payloads in req.body
+app.use(express.json());
+
+// Middleware to ensure DB connection before handling requests
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    console.warn('DB connection failed for request, proceeding with fallback.', error.message);
+    next();
+  }
+});
 
 // Routes
 app.use('/api/leads', require('./routes/leadRoutes'));
@@ -58,21 +69,22 @@ app.get('/', (req, res) => {
   res.status(200).json({ message: 'Developer Portfolio CRM API is running...' });
 });
 
-// Database Connection and Server Bootstrapping
+// Only start the server locally (not on Vercel)
 const PORT = process.env.PORT || 5000;
+if (!process.env.VERCEL) {
+  const startServer = async () => {
+    try {
+      await connectDB();
+    } catch (error) {
+      console.error('Database connection unavailable. The API will continue running with degraded functionality.', error.message);
+    }
 
-const startServer = async () => {
-  try {
-    await connectDB();
-  } catch (error) {
-    console.error('Database connection unavailable. The API will continue running with degraded functionality.', error.message);
-  }
+    app.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
+  };
 
-  app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-  });
-};
-
-startServer();
+  startServer();
+}
 
 module.exports = app;
